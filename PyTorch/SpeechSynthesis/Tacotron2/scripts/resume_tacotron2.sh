@@ -1,5 +1,3 @@
-mkdir -p taco_output
-
 python -m multiproc train.py \
        -m Tacotron2 \
        -o ./taco_output/ \
@@ -14,4 +12,5 @@ python -m multiproc train.py \
        --anneal-factor 0.1 \
        --load-mel-from-disk \
        --training-files=filelists/ljs_mel_text_train_filelist.txt \
-       --validation-files=filelists/ljs_mel_text_val_filelist.txt
+       --validation-files=filelists/ljs_mel_text_val_filelist.txt \
+       --resume-from-last

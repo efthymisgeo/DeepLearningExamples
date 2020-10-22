@@ -1,8 +1,8 @@
-mkdir -p taco_output
+mkdir -p taco_single_output
 
-python -m multiproc train.py \
+python train.py \
        -m Tacotron2 \
-       -o ./taco_output/ \
+       -o ./taco_single_output/ \
        -lr 1e-3 \
        --epochs 1501 \
        -bs 36 \

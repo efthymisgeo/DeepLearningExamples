@@ -53,7 +53,7 @@ def load_filepaths_and_text(dataset_path, filename, split="|"):
                     "incorrect line format for file: {}".format(filename))
             path = os.path.join(root, parts[0])
             text = parts[1]
-            return path,text
+            return path, text
         filepaths_and_text = [split_line(dataset_path, line) for line in f]
     return filepaths_and_text
 
