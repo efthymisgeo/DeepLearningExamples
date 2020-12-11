@@ -57,13 +57,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-lp", "--log_path", required=True,
                         help="path to log file")
-    parser.add_argument("--skip", required=False, default=39)
-    parser.add_argument("--max_epochs", required=False, default=1502)
+    parser.add_argument("--skip", required=False, default=39,
+                        help="Lines to skip in the beginning")
+    parser.add_argument("--max_epochs", required=False, default=1502,
+                       help="max epochs of network training")
+    parser.add_argument("--title", type=str, required=False, default="Tacotron2",
+                       help="the title of the figure")
 
     args = parser.parse_args()
     path = args.log_path
     skip = args.skip
     max_epochs = args.max_epochs
+    header = args.title
 
     epochs, loss = clean_json(path, skip=skip, max_epochs=max_epochs)
 
@@ -75,9 +80,9 @@ if __name__ == "__main__":
     val_loss,  = plt.plot(epochs, loss["val_loss"], label="val_loss")
     train_legend = plt.legend(handles=[train_loss, val_loss],
                               loc="upper right")
-    plt.title("Custon Tacotron2 Loss (EN)")
+    plt.title(f"Custon {header} Loss (EN)")
     plt.grid(b=True, which='major', color='#666666', linestyle='--')
     plt.minorticks_on()
     plt.grid(b=True, which='minor', color='#999999', linestyle='--', alpha=0.2)
-    plt.savefig("taco2_en_custom_loss.png")
-    plt.savefig("taco2_en_custom_loss.pdf")
+    plt.savefig(f"{header}_en_custom_loss.png")
+    plt.savefig(f"{header}_en_custom_loss.pdf")

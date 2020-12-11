@@ -64,13 +64,15 @@ def parse_args(parser):
                         help='Directory to save checkpoints')
     parser.add_argument('-d', '--dataset-path', type=str,
                         default='./', help='Path to dataset')
-    parser.add_argument('-m', '--model-name', type=str, default='', required=True,
+    parser.add_argument('-m', '--model-name', type=str, default='',
+                        required=True,
                         help='Model to train')
     parser.add_argument('--log-file', type=str, default='nvlog.json',
                         help='Filename for logging')
     parser.add_argument('--anneal-steps', nargs='*',
                         help='Epochs after which decrease learning rate')
-    parser.add_argument('--anneal-factor', type=float, choices=[0.1, 0.3], default=0.1,
+    parser.add_argument('--anneal-factor', type=float,
+                        choices=[0.1, 0.3], default=0.1,
                         help='Factor for annealing learning rate')
 
     # training
@@ -82,7 +84,10 @@ def parse_args(parser):
     training.add_argument('--checkpoint-path', type=str, default='',
                           help='Checkpoint path to resume training')
     training.add_argument('--resume-from-last', action='store_true',
-                          help='Resumes training from the last checkpoint; uses the directory provided with \'--output\' option to search for the checkpoint \"checkpoint_<model_name>_last.pt\"')
+                          help='Resumes training from the last checkpoint;'
+                          'uses the directory provided with \'--output\''
+                          'option to search for the checkpoint'
+                          '\"checkpoint_<model_name>_last.pt\"')
     training.add_argument('--dynamic-loss-scaling', type=bool, default=True,
                           help='Enable dynamic loss scaling')
     training.add_argument('--amp', action='store_true',
@@ -91,13 +96,16 @@ def parse_args(parser):
                           help='Enable cudnn')
     training.add_argument('--cudnn-benchmark', action='store_true',
                           help='Run cudnn benchmark')
-    training.add_argument('--disable-uniform-initialize-bn-weight', action='store_true',
-                          help='disable uniform initialization of batchnorm layer weight')
+    training.add_argument('--disable-uniform-initialize-bn-weight',
+                          action='store_true',
+                          help='disable uniform initialization of'
+                          'batchnorm layer weight')
 
     optimization = parser.add_argument_group('optimization setup')
     optimization.add_argument(
         '--use-saved-learning-rate', default=False, type=bool)
-    optimization.add_argument('-lr', '--learning-rate', type=float, required=True,
+    optimization.add_argument('-lr', '--learning-rate', type=float,
+                              required=True,
                               help='Learing rate')
     optimization.add_argument('--weight-decay', default=1e-6, type=float,
                               help='Weight decay')
@@ -106,12 +114,14 @@ def parse_args(parser):
     optimization.add_argument('-bs', '--batch-size', type=int, required=True,
                               help='Batch size per GPU')
     optimization.add_argument('--grad-clip', default=5.0, type=float,
-                              help='Enables gradient clipping and sets maximum gradient norm value')
+                              help='Enables gradient clipping and sets'
+                              'maximum gradient norm value')
 
     # dataset parameters
     dataset = parser.add_argument_group('dataset parameters')
     dataset.add_argument('--load-mel-from-disk', action='store_true',
-                         help='Loads mel spectrograms from disk instead of computing them on the fly')
+                         help='Loads mel spectrograms from disk'
+                         'instead of computing them on the fly')
     dataset.add_argument('--training-files',
                          default='filelists/ljs_audio_text_train_filelist.txt',
                          type=str, help='Path to training filelist')
@@ -143,14 +153,18 @@ def parse_args(parser):
     # distributed.add_argument('--distributed-run', default=True, type=bool,
     #                          help='enable distributed run')
     distributed.add_argument('--rank', default=0, type=int,
-                             help='Rank of the process, do not set! Done by multiproc module')
+                             help='Rank of the process, do not set!'
+                             'Done by multiproc module')
     distributed.add_argument('--world-size', default=1, type=int,
-                             help='Number of processes, do not set! Done by multiproc module')
-    distributed.add_argument('--dist-url', type=str, default='tcp://localhost:23456',
+                             help='Number of processes, do not set!'
+                             'Done by multiproc module')
+    distributed.add_argument('--dist-url', type=str,
+                             default='tcp://localhost:23456',
                              help='Url used to set up distributed training')
     distributed.add_argument('--group-name', type=str, default='group_name',
                              required=False, help='Distributed group name')
-    distributed.add_argument('--dist-backend', default='nccl', type=str, choices={'nccl'},
+    distributed.add_argument('--dist-backend', default='nccl', type=str,
+                             choices={'nccl'},
                              help='Distributed run backend')
 
     benchmark = parser.add_argument_group('benchmark')
@@ -162,7 +176,7 @@ def parse_args(parser):
 def reduce_tensor(tensor, num_gpus):
     rt = tensor.clone()
     dist.all_reduce(rt, op=dist.reduce_op.SUM)
-    rt /= num_gpus
+    rt = rt / num_gpus
     return rt
 
 
@@ -181,14 +195,16 @@ def init_distributed(args, world_size, rank, group_name):
     print("Done initializing distributed")
 
 
-def save_checkpoint(model, optimizer, epoch, config, amp_run, output_dir, model_name,
-                    local_rank, world_size):
+def save_checkpoint(model, optimizer, epoch, config, amp_run, output_dir,
+                    model_name, local_rank, world_size):
 
     random_rng_state = torch.random.get_rng_state().cuda()
     cuda_rng_state = torch.cuda.get_rng_state(local_rank).cuda()
 
-    random_rng_states_all = [torch.empty_like(random_rng_state) for _ in range(world_size)]
-    cuda_rng_states_all = [torch.empty_like(cuda_rng_state) for _ in range(world_size)]
+    random_rng_states_all = \
+        [torch.empty_like(random_rng_state) for _ in range(world_size)]
+    cuda_rng_states_all = \
+        [torch.empty_like(cuda_rng_state) for _ in range(world_size)]
 
     if world_size > 1:
         dist.all_gather(random_rng_states_all, random_rng_state)
@@ -221,14 +237,16 @@ def save_checkpoint(model, optimizer, epoch, config, amp_run, output_dir, model_
         symlink_dst = os.path.join(
             output_dir, "checkpoint_{}_last.pt".format(model_name))
         if os.path.exists(symlink_dst) and os.path.islink(symlink_dst):
-            print("|||| Updating symlink", symlink_dst, "to point to", symlink_src)
+            print("|||| Updating symlink", symlink_dst,
+                  "to point to", symlink_src)
             os.remove(symlink_dst)
 
         os.symlink(symlink_src, symlink_dst)
 
 
 def get_last_checkpoint_filename(output_dir, model_name):
-    symlink = os.path.join(output_dir, "checkpoint_{}_last.pt".format(model_name))
+    symlink = os.path.join(output_dir,
+                           f"checkpoint_{model_name}_last.pt")
     if os.path.exists(symlink):
         print("|||| Loading checkpoint from symlink", symlink)
         return os.path.join(output_dir, os.readlink(symlink))
@@ -237,8 +255,8 @@ def get_last_checkpoint_filename(output_dir, model_name):
         return ""
 
 
-def load_checkpoint(model, optimizer, epoch, config, amp_run, filepath, local_rank):
-
+def load_checkpoint(model, optimizer, epoch, config,
+                    amp_run, filepath, local_rank):
     checkpoint = torch.load(filepath, map_location='cpu')
 
     epoch[0] = checkpoint['epoch']+1
@@ -251,9 +269,12 @@ def load_checkpoint(model, optimizer, epoch, config, amp_run, filepath, local_ra
 
     if amp_run:
         amp.load_state_dict(checkpoint['amp'])
+    
+    print(f"Loaded checkpoint from epoch {epoch[0]}")
 
 
-# adapted from: https://discuss.pytorch.org/t/opinion-eval-should-be-a-context-manager/18998/3
+# adapted from:
+# https://discuss.pytorch.org/t/opinion-eval-should-be-a-context-manager/18998/3
 # Following snippet is licensed under MIT license
 
 @contextmanager
@@ -301,7 +322,8 @@ def validate(model, criterion, valset, epoch, batch_iter, batch_size,
             iter_time = iter_stop_time - iter_start_time
 
             items_per_sec = reduced_num_items/iter_time
-            DLLogger.log(step=(epoch, batch_iter, i), data={'val_items_per_sec': items_per_sec})
+            DLLogger.log(step=(epoch, batch_iter, i),
+                         data={'val_items_per_sec': items_per_sec})
             val_items_per_sec += items_per_sec
             num_iters += 1
 
@@ -309,9 +331,12 @@ def validate(model, criterion, valset, epoch, batch_iter, batch_size,
 
         DLLogger.log(step=(epoch,), data={'val_loss': val_loss})
         DLLogger.log(step=(epoch,), data={'val_items_per_sec':
-                                         (val_items_per_sec/num_iters if num_iters > 0 else 0.0)})
+                                          (val_items_per_sec/num_iters
+                                           if num_iters > 0 else 0.0)
+                                          })
 
         return val_loss
+
 
 def adjust_learning_rate(iteration, epoch, optimizer, learning_rate,
                          anneal_steps, anneal_factor, rank):
@@ -328,7 +353,10 @@ def adjust_learning_rate(iteration, epoch, optimizer, learning_rate,
         lr = learning_rate*(anneal_factor ** p)
 
     if optimizer.param_groups[0]['lr'] != lr:
-        DLLogger.log(step=(epoch, iteration), data={'learning_rate changed': str(optimizer.param_groups[0]['lr'])+" -> "+str(lr)})
+        DLLogger.log(step=(epoch, iteration),
+                     data={'learning_rate changed':
+                            str(optimizer.param_groups[0]['lr']) \
+                            + " -> "+str(lr)})
 
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
@@ -351,14 +379,15 @@ def main():
 
     if local_rank == 0:
         DLLogger.init(backends=[JSONStreamBackend(Verbosity.DEFAULT,
-                                                  args.output+'/'+args.log_file),
+                                                  args.output \
+                                                  + '/' + args.log_file),
                                 StdOutBackend(Verbosity.VERBOSE)])
     else:
         DLLogger.init(backends=[])
 
-    for k,v in vars(args).items():
-        DLLogger.log(step="PARAMETER", data={k:v})
-    DLLogger.log(step="PARAMETER", data={'model_name':'Tacotron2_PyT'})
+    for k, v in vars(args).items():
+        DLLogger.log(step="PARAMETER", data={k: v})
+    DLLogger.log(step="PARAMETER", data={'model_name': 'Tacotron2_PyT'})
 
     model_name = args.model_name
     parser = models.parse_model_args(model_name, parser)
@@ -374,14 +403,17 @@ def main():
     run_start_time = time.perf_counter()
 
     model_config = models.get_model_config(model_name, args)
-    model = models.get_model(model_name, model_config,
-                             cpu_run=False,
-                             uniform_initialize_bn_weight=not args.disable_uniform_initialize_bn_weight)
+    model = \
+        models.get_model(model_name,
+                         model_config,
+                         cpu_run=False,
+                         uniform_initialize_bn_weight=not args.disable_uniform_initialize_bn_weight)
 
     if not args.amp and distributed_run:
         model = DDP(model)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate,
+    optimizer = torch.optim.Adam(model.parameters(),
+                                 lr=args.learning_rate,
                                  weight_decay=args.weight_decay)
 
     if args.amp:
@@ -397,13 +429,15 @@ def main():
     start_epoch = [0]
 
     if args.resume_from_last:
-        args.checkpoint_path = get_last_checkpoint_filename(args.output, model_name)
+        args.checkpoint_path = \
+            get_last_checkpoint_filename(args.output, model_name)
 
-    if args.checkpoint_path is not "":
+    if args.checkpoint_path != "":
         load_checkpoint(model, optimizer, start_epoch, model_config,
                         args.amp, args.checkpoint_path, local_rank)
 
     start_epoch = start_epoch[0]
+    # import pdb; pdb.set_trace()
 
     criterion = loss_functions.get_loss_function(model_name, sigma)
 
@@ -463,8 +497,11 @@ def main():
             DLLogger.log(step=(epoch, i),
                          data={'glob_iter/iters_per_epoch': str(iteration)+"/"+str(len(train_loader))})
 
-            adjust_learning_rate(iteration, epoch, optimizer, args.learning_rate,
-                                 args.anneal_steps, args.anneal_factor, local_rank)
+            adjust_learning_rate(iteration, epoch, optimizer,
+                                 args.learning_rate,
+                                 args.anneal_steps,
+                                 args.anneal_factor,
+                                 local_rank)
 
             model.zero_grad()
             x, y, num_items = batch_to_gpu(batch)
@@ -480,8 +517,9 @@ def main():
                 reduced_num_items = num_items.item()
             if np.isnan(reduced_loss):
                 raise Exception("loss is NaN")
-
-            DLLogger.log(step=(epoch,i), data={'train_loss': reduced_loss})
+            print(f"Not reduced_loss is: {loss}")
+            print(f"Current reduced loss is {reduced_loss:3f}")
+            DLLogger.log(step=(epoch, i), data={'train_loss': reduced_loss})
 
             num_iters += 1
 
@@ -495,8 +533,9 @@ def main():
                     amp.master_params(optimizer), args.grad_clip_thresh)
             else:
                 loss.backward()
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), args.grad_clip_thresh)
+                grad_norm = \
+                    torch.nn.utils.clip_grad_norm(model.parameters(),
+                                                  args.grad_clip_thresh)
 
             optimizer.step()
 
@@ -506,7 +545,8 @@ def main():
             items_per_sec = reduced_num_items/iter_time
             train_epoch_items_per_sec += items_per_sec
 
-            DLLogger.log(step=(epoch, i), data={'train_items_per_sec': items_per_sec})
+            DLLogger.log(step=(epoch, i),
+                         data={'train_items_per_sec': items_per_sec})
             DLLogger.log(step=(epoch, i), data={'train_iter_time': iter_time})
             iteration += 1
 
@@ -540,6 +580,7 @@ def main():
 
     if local_rank == 0:
         DLLogger.flush()
+
 
 if __name__ == '__main__':
     main()

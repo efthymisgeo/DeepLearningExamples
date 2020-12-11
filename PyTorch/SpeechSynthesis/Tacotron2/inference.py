@@ -33,7 +33,7 @@ import numpy as np
 from scipy.io.wavfile import write
 import matplotlib
 import matplotlib.pyplot as plt
-
+import os
 import sys
 
 import time
@@ -41,6 +41,29 @@ import dllogger as DLLogger
 from dllogger import StdOutBackend, JSONStreamBackend, Verbosity
 
 from waveglow.denoiser import Denoiser
+
+
+def check_directory_and_create(dir_path, exists_warning=False):
+    """
+    Checks if the path specified is a directory or creates it if it doesn't
+    exist.
+    
+    Args:
+        dir_path (string): directory path to check/create
+    
+    Returns:
+        (string): the input path
+    """
+    if os.path.exists(dir_path):
+        if not os.path.isdir(dir_path):
+            raise ValueError(f"Given path {dir_path} is not a directory")
+        elif exists_warning:
+            print(f"WARNING: Already existing experiment folder {dir_path}."
+                  "It is recommended to change experiment_id in "
+                  "configs/exp_config.json file. Proceeding by overwriting")
+    else:
+        os.mkdir(dir_path)
+    return os.path.abspath(dir_path)
 
 def parse_args(parser):
     """
@@ -51,6 +74,8 @@ def parse_args(parser):
     parser.add_argument('-o', '--output', required=True,
                         help='output folder to save audio (file per phrase)')
     parser.add_argument('--suffix', type=str, default="", help="output filename suffix")
+    parser.add_argument('--custom_name', default=False,
+                        action="store_true", help="When used the generated .wav's are named as id.wav")
     parser.add_argument('--tacotron2', type=str,
                         help='full path to the Tacotron2 model checkpoint file')
     parser.add_argument('--waveglow', type=str,
@@ -59,6 +84,7 @@ def parse_args(parser):
     parser.add_argument('-d', '--denoising-strength', default=0.01, type=float)
     parser.add_argument('-sr', '--sampling-rate', default=22050, type=int,
                         help='Sampling rate')
+
 
     run_mode = parser.add_mutually_exclusive_group()
     run_mode.add_argument('--fp16', action='store_true',
@@ -194,6 +220,10 @@ def main():
         description='PyTorch Tacotron 2 Inference')
     parser = parse_args(parser)
     args, _ = parser.parse_known_args()
+    use_custom_naming = args.custom_name
+    input_path = args.input
+
+    check_directory_and_create(args.output, exists_warning=True)
 
     DLLogger.init(backends=[JSONStreamBackend(Verbosity.DEFAULT,
                                               args.output+'/'+args.log_file),
@@ -257,15 +287,26 @@ def main():
     DLLogger.log(step=0, data={"latency": (measurements['tacotron2_time']+measurements['waveglow_time']+measurements['denoiser_time'])})
 
     for i, audio in enumerate(audios):
-
-        plt.imshow(alignments[i].float().data.cpu().numpy().T, aspect="auto", origin="lower")
-        figure_path = args.output+"alignment_"+str(i)+"_"+args.suffix+".png"
-        plt.savefig(figure_path)
-
-        audio = audio[:mel_lengths[i]*args.stft_hop_length]
-        audio = audio/torch.max(torch.abs(audio))
-        audio_path = args.output+"audio_"+str(i)+"_"+args.suffix+".wav"
-        write(audio_path, args.sampling_rate, audio.cpu().numpy())
+        if use_custom_naming:
+            # figure_path = os.path.join(args.output, figure_path)
+            audio = audio[:mel_lengths[i]*args.stft_hop_length]
+            audio = audio/torch.max(torch.abs(audio))
+            custom_name = (input_path.split("/")[-1]).split(".")[0]
+            audio_path = \
+                os.path.join(args.output, custom_name+".wav")
+            write(audio_path, args.sampling_rate, audio.cpu().numpy())
+        else:
+            plt.imshow(alignments[i].float().data.cpu().numpy().T, aspect="auto", origin="lower")
+            # figure_path = args.output+"alignment_"+str(i)+"_"+args.suffix+".png"
+            figure_path = "alignment_"+str(i)+"_"+args.suffix+".png"
+            # import pdb; pdb.set_trace()
+            figure_path = os.path.join(args.output, figure_path)
+            plt.savefig(figure_path)
+            audio = audio[:mel_lengths[i]*args.stft_hop_length]
+            audio = audio/torch.max(torch.abs(audio))
+            audio_path = \
+                os.path.join(args.output, "audio_"+str(i)+"_"+args.suffix+".wav")
+            write(audio_path, args.sampling_rate, audio.cpu().numpy())
 
     DLLogger.flush()
 
