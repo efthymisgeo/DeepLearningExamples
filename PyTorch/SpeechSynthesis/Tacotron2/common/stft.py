@@ -107,12 +107,11 @@ class STFT(torch.nn.Module):
     def inverse(self, magnitude, phase):
         recombine_magnitude_phase = torch.cat(
             [magnitude*torch.cos(phase), magnitude*torch.sin(phase)], dim=1)
-
         inverse_transform = F.conv_transpose2d(
             recombine_magnitude_phase.unsqueeze(-1),
             Variable(self.inverse_basis.unsqueeze(-1), requires_grad=False),
-            stride=(self.hop_length,1),
-            padding=(0,0))
+            stride=(self.hop_length, 1),
+            padding=(0, 0))
         inverse_transform = inverse_transform.squeeze(-1)
 
         if self.window is not None:

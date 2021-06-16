@@ -676,7 +676,6 @@ class Tacotron2(nn.Module):
 
 
     def infer(self, inputs, input_lengths):
-
         embedded_inputs = self.embedding(inputs).transpose(1, 2)
         encoder_outputs = self.encoder.infer(embedded_inputs, input_lengths)
         mel_outputs, gate_outputs, alignments, mel_lengths = self.decoder.infer(
@@ -686,6 +685,7 @@ class Tacotron2(nn.Module):
         mel_outputs_postnet = mel_outputs + mel_outputs_postnet
 
         BS = mel_outputs_postnet.size(0)
+        # print(f"alignments shape {alignments.shape}")
         alignments = alignments.unfold(1, BS, BS).transpose(0,2)
 
         return mel_outputs_postnet, mel_lengths, alignments

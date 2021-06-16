@@ -33,5 +33,3 @@ if __name__ == "__main__":
 
     for idx, txt in id2phrase_map.items():
         make_txt(os.path.join(out_folder, str(idx)), txt)
-     
-

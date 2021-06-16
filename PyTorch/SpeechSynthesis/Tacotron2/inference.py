@@ -25,6 +25,8 @@
 #
 # *****************************************************************************
 
+from common.layers import TacotronSTFT
+from common.audio_processing import griffin_lim
 from tacotron2.text import text_to_sequence
 import models
 import torch
@@ -41,16 +43,17 @@ import dllogger as DLLogger
 from dllogger import StdOutBackend, JSONStreamBackend, Verbosity
 
 from waveglow.denoiser import Denoiser
+from plot_mel_spec import plot_mel_spectrogram
 
 
 def check_directory_and_create(dir_path, exists_warning=False):
     """
     Checks if the path specified is a directory or creates it if it doesn't
     exist.
-    
+
     Args:
         dir_path (string): directory path to check/create
-    
+
     Returns:
         (string): the input path
     """
@@ -69,8 +72,8 @@ def parse_args(parser):
     """
     Parse commandline arguments.
     """
-    parser.add_argument('-i', '--input', type=str, required=True,
-                        help='full path to the input text (phareses separated by new line)')
+    parser.add_argument('-i', '--input', type=str, required=False,
+                        help='full path to the input text (phrases separated by new line)')
     parser.add_argument('-o', '--output', required=True,
                         help='output folder to save audio (file per phrase)')
     parser.add_argument('--suffix', type=str, default="", help="output filename suffix")
@@ -84,6 +87,24 @@ def parse_args(parser):
     parser.add_argument('-d', '--denoising-strength', default=0.01, type=float)
     parser.add_argument('-sr', '--sampling-rate', default=22050, type=int,
                         help='Sampling rate')
+    parser.add_argument('-preproc', '--text-cleaners', nargs='*',
+                        default=['english_cleaners'], type=str,
+                        help='Type of text cleaners for input text')
+
+    # audio parameters
+    audio = parser.add_argument_group('audio parameters')
+    audio.add_argument('--max-wav-value', default=32768.0, type=float,
+                       help='Maximum audiowave value')
+    audio.add_argument('--filter-length', default=1024, type=int,
+                       help='Filter length')
+    audio.add_argument('--hop-length', default=256, type=int,
+                       help='Hop (stride) length')
+    audio.add_argument('--win-length', default=1024, type=int,
+                       help='Window length')
+    audio.add_argument('--mel-fmin', default=0.0, type=float,
+                       help='Minimum mel frequency')
+    audio.add_argument('--mel-fmax', default=8000.0, type=float,
+                       help='Maximum mel frequency')
 
 
     run_mode = parser.add_mutually_exclusive_group()
@@ -98,6 +119,14 @@ def parse_args(parser):
                         help='Include warmup')
     parser.add_argument('--stft-hop-length', type=int, default=256,
                         help='STFT hop length for estimating audio length from mel size')
+    parser.add_argument("--use-griffin-lim", action="store_true",
+                        help="use griffin-lim spectrogram inversion algorithm instead of waveglow")
+    parser.add_argument("--griffin-iters", type=int, default=60,
+                        help="griffin-lim iterations")
+    parser.add_argument("--use-extracted-mels", action="store_true",
+                        help="use extracted mels specs")
+    parser.add_argument('--mel-path', required=False, type=str,
+                        help='path to mel file to generate audio with griffin lim')
 
     return parser
 
@@ -176,12 +205,38 @@ def pad_sequences(batch):
     return text_padded, input_lengths
 
 
-def prepare_input_sequence(texts, cpu_run=False):
+def apply_griffin_lim(args, mel):
+    taco_stft = TacotronSTFT(
+                args.filter_length,
+                args.hop_length,
+                args.win_length,
+                80,
+                args.sampling_rate,
+                )
+    with torch.no_grad():
+        mel_decompress = taco_stft.spectral_de_normalize(mel)
+        # mel_decompress = taco_stft.spectral_de_normalize(mel_outputs_postnet)
+        mel_decompress = mel_decompress.transpose(1, 2).data.cpu()
+        spec_from_mel_scaling = 1000
+        spec_from_mel = torch.mm(mel_decompress[0], taco_stft.mel_basis)
+        spec_from_mel = spec_from_mel.transpose(0, 1).unsqueeze(0)
+        spec_from_mel = spec_from_mel * spec_from_mel_scaling
+
+        audios = griffin_lim(torch.autograd.Variable(spec_from_mel[:, :, :-1]), taco_stft.stft_fn, args.griffin_iters)
+
+        audios = audios.squeeze()
+        audios = [audios.cpu()]
+    return audios
+
+
+def prepare_input_sequence(texts,
+                           cpu_run=False,
+                           text_cleaners=['english_cleaners']):
 
     d = []
     for i,text in enumerate(texts):
         d.append(torch.IntTensor(
-            text_to_sequence(text, ['english_cleaners'])[:]))
+            text_to_sequence(text, text_cleaners)[:]))
 
     text_padded, input_lengths = pad_sequences(d)
     if not cpu_run:
@@ -222,9 +277,11 @@ def main():
     args, _ = parser.parse_known_args()
     use_custom_naming = args.custom_name
     input_path = args.input
+    text_cleaners = args.text_cleaners
 
     check_directory_and_create(args.output, exists_warning=True)
 
+    # import pdb; pdb.set_trace()
     DLLogger.init(backends=[JSONStreamBackend(Verbosity.DEFAULT,
                                               args.output+'/'+args.log_file),
                             StdOutBackend(Verbosity.VERBOSE)])
@@ -232,68 +289,113 @@ def main():
         DLLogger.log(step="PARAMETER", data={k:v})
     DLLogger.log(step="PARAMETER", data={'model_name':'Tacotron2_PyT'})
 
-    tacotron2 = load_and_setup_model('Tacotron2', parser, args.tacotron2,
-                                     args.fp16, args.cpu, forward_is_infer=True)
-    waveglow = load_and_setup_model('WaveGlow', parser, args.waveglow,
+    if args.use_extracted_mels:
+        print(f"mel found in {args.mel_path}")
+        mel = torch.load(args.mel_path)
+        mel = mel.unsqueeze(0)
+        print(f"The size of the mel we just loaded is {mel.shape}")
+        audios = apply_griffin_lim(args, mel)
+    else:
+        tacotron2 = load_and_setup_model('Tacotron2', parser, args.tacotron2,
+                                        args.fp16, args.cpu, forward_is_infer=True)
+
+        if not args.use_griffin_lim:
+            waveglow = \
+                load_and_setup_model('WaveGlow', parser, args.waveglow,
                                     args.fp16, args.cpu, forward_is_infer=True)
-    denoiser = Denoiser(waveglow)
-    if not args.cpu:
-        denoiser.cuda()
+            denoiser = Denoiser(waveglow)
+            if not args.cpu:
+                denoiser.cuda()
 
-    jitted_tacotron2 = torch.jit.script(tacotron2)
+        jitted_tacotron2 = torch.jit.script(tacotron2)
 
-    texts = []
-    try:
-        f = open(args.input, 'r')
-        texts = f.readlines()
-    except:
-        print("Could not read file")
-        sys.exit(1)
+        texts = []
+        try:
+            f = open(args.input, 'r')
+            texts = f.readlines()
+        except:
+            print("Could not read file")
+            sys.exit(1)
 
-    if args.include_warmup:
-        sequence = torch.randint(low=0, high=148, size=(1,50)).long()
-        input_lengths = torch.IntTensor([sequence.size(1)]).long()
-        if not args.cpu:
-            sequence = sequence.cuda()
-            input_lengths = input_lengths.cuda()
-        for i in range(3):
-            with torch.no_grad():
-                mel, mel_lengths, _ = jitted_tacotron2(sequence, input_lengths)
-                _ = waveglow(mel)
+        if args.include_warmup and (not args.use_griffin_lim):
+            sequence = torch.randint(low=0, high=148, size=(1,50)).long()
+            input_lengths = torch.IntTensor([sequence.size(1)]).long()
+            if not args.cpu:
+                sequence = sequence.cuda()
+                input_lengths = input_lengths.cuda()
+            for i in range(3):
+                with torch.no_grad():
+                    mel, mel_lengths, _ = jitted_tacotron2(sequence, input_lengths)
+                    _ = waveglow(mel)
 
-    measurements = {}
+        measurements = {}
 
-    sequences_padded, input_lengths = prepare_input_sequence(texts, args.cpu)
+        sequences_padded, input_lengths = \
+            prepare_input_sequence(texts, args.cpu, text_cleaners)
 
-    with torch.no_grad(), MeasureTime(measurements, "tacotron2_time", args.cpu):
-        mel, mel_lengths, alignments = jitted_tacotron2(sequences_padded, input_lengths)
+        with torch.no_grad(), MeasureTime(measurements, "tacotron2_time", args.cpu):
+            mel, mel_lengths, alignments = jitted_tacotron2(sequences_padded, input_lengths)
 
-    with torch.no_grad(), MeasureTime(measurements, "waveglow_time", args.cpu):
-        audios = waveglow(mel, sigma=args.sigma_infer)
-        audios = audios.float()
-    with torch.no_grad(), MeasureTime(measurements, "denoiser_time", args.cpu):
-        audios = denoiser(audios, strength=args.denoising_strength).squeeze(1)
+        if args.use_griffin_lim:
+            print(f"The size of the generated mel spec is {mel.shape}")
+            audios = apply_griffin_lim(args, mel)
+                # import pdb; pdb.set_trace()
+                # audios = audios.cpu().numpy()
+                #audio = audio.astype('int16')
+                # audio_path = os.path.join('samples', "{}_synthesis.wav".format(out_filename))
+                # write(audio_path, hparams.sampling_rate, audio)
+                # print(audio_path)
+        else:    
+            with torch.no_grad(), MeasureTime(measurements, "waveglow_time", args.cpu):
+                audios = waveglow(mel, sigma=args.sigma_infer)
+                audios = audios.float()
+            with torch.no_grad(), MeasureTime(measurements, "denoiser_time", args.cpu):
+                audios = denoiser(audios, strength=args.denoising_strength).squeeze(1)
 
-    print("Stopping after",mel.size(2),"decoder steps")
+            print("Stopping after",mel.size(2),"decoder steps")
 
-    tacotron2_infer_perf = mel.size(0)*mel.size(2)/measurements['tacotron2_time']   
-    waveglow_infer_perf = audios.size(0)*audios.size(1)/measurements['waveglow_time']
+            tacotron2_infer_perf = mel.size(0)*mel.size(2)/measurements['tacotron2_time']   
+            waveglow_infer_perf = audios.size(0)*audios.size(1)/measurements['waveglow_time']
 
-    DLLogger.log(step=0, data={"tacotron2_items_per_sec": tacotron2_infer_perf})
-    DLLogger.log(step=0, data={"tacotron2_latency": measurements['tacotron2_time']})
-    DLLogger.log(step=0, data={"waveglow_items_per_sec": waveglow_infer_perf})
-    DLLogger.log(step=0, data={"waveglow_latency": measurements['waveglow_time']})
-    DLLogger.log(step=0, data={"denoiser_latency": measurements['denoiser_time']})
-    DLLogger.log(step=0, data={"latency": (measurements['tacotron2_time']+measurements['waveglow_time']+measurements['denoiser_time'])})
+            DLLogger.log(step=0, data={"tacotron2_items_per_sec": tacotron2_infer_perf})
+            DLLogger.log(step=0, data={"tacotron2_latency": measurements['tacotron2_time']})
+            DLLogger.log(step=0, data={"waveglow_items_per_sec": waveglow_infer_perf})
+            DLLogger.log(step=0, data={"waveglow_latency": measurements['waveglow_time']})
+            DLLogger.log(step=0, data={"denoiser_latency": measurements['denoiser_time']})
+            DLLogger.log(step=0, data={"latency": (measurements['tacotron2_time']+measurements['waveglow_time']+measurements['denoiser_time'])})
+
 
     for i, audio in enumerate(audios):
         if use_custom_naming:
-            # figure_path = os.path.join(args.output, figure_path)
-            audio = audio[:mel_lengths[i]*args.stft_hop_length]
+            if args.use_extracted_mels:
+                custom_name = (args.mel_path.split("/")[-1]).split(".")[0]
+            else:
+                custom_name = (input_path.split("/")[-1]).split(".")[0]
+            custom_path = os.path.join(args.output, custom_name)
+            if not args.use_extracted_mels:
+                # save alignment
+                import pdb; pdb.set_trace()
+                plt.imshow(alignments[i].float().data.cpu().numpy().T, aspect="auto", origin="lower")
+                figure_path = custom_path + "_alignment.png"
+                plt.savefig(figure_path)
+                meltitle = "_predicted"
+            else:
+                meltitle = "_extracetd"
+                # save predicted mel
+            # import pdb; pdb.set_trace()
+            plot_mel_spectrogram(mel, title=meltitle,
+                                dirname=custom_path,
+                                append_name=True,
+                                load_mel_path=False,
+                                # load_mel_path=True
+                                )
+            # save generated audio
+            # if not args.use_griffin_lim:
+            if not args.use_extracted_mels:
+                audio = audio[:mel_lengths[i]*args.stft_hop_length]
             audio = audio/torch.max(torch.abs(audio))
-            custom_name = (input_path.split("/")[-1]).split(".")[0]
-            audio_path = \
-                os.path.join(args.output, custom_name+".wav")
+            # custom_name = (input_path.split("/")[-1]).split(".")[0]
+            audio_path = custom_path + ".wav"
             write(audio_path, args.sampling_rate, audio.cpu().numpy())
         else:
             plt.imshow(alignments[i].float().data.cpu().numpy().T, aspect="auto", origin="lower")

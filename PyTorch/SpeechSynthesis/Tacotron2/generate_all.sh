@@ -1,0 +1,2 @@
+bash generate_all_en_models.sh
+bash generate_all_gr_models.sh

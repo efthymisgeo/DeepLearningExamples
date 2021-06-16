@@ -38,6 +38,7 @@ from torch.nn.parameter import Parameter
 
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
+from inference import checkpoint_from_distributed, unwrap_distributed
 
 from apex.parallel import DistributedDataParallel as DDP
 
@@ -88,6 +89,9 @@ def parse_args(parser):
                           'uses the directory provided with \'--output\''
                           'option to search for the checkpoint'
                           '\"checkpoint_<model_name>_last.pt\"')
+    training.add_argument('--resume-from-multiproc', action='store_true',
+                          help='Loads model trained on multiproc mode'
+                          'and resumes training from the last checkpoint;')
     training.add_argument('--dynamic-loss-scaling', type=bool, default=True,
                           help='Enable dynamic loss scaling')
     training.add_argument('--amp', action='store_true',
@@ -131,6 +135,8 @@ def parse_args(parser):
     dataset.add_argument('--text-cleaners', nargs='*',
                          default=['english_cleaners'], type=str,
                          help='Type of text cleaners for input text')
+    dataset.add_argument('--numpy-mels', action='store_true',
+                         help='load .npy arrays instead of .pt tensors')
 
     # audio parameters
     audio = parser.add_argument_group('audio parameters')
@@ -256,7 +262,7 @@ def get_last_checkpoint_filename(output_dir, model_name):
 
 
 def load_checkpoint(model, optimizer, epoch, config,
-                    amp_run, filepath, local_rank):
+                    amp_run, filepath, local_rank, resume_from_multiproc):
     checkpoint = torch.load(filepath, map_location='cpu')
 
     epoch[0] = checkpoint['epoch']+1
@@ -264,6 +270,8 @@ def load_checkpoint(model, optimizer, epoch, config,
     torch.cuda.set_rng_state(checkpoint['cuda_rng_state_all'][device_id])
     torch.random.set_rng_state(checkpoint['random_rng_states_all'][device_id])
     config = checkpoint['config']
+    if checkpoint_from_distributed(checkpoint['state_dict']) and resume_from_multiproc:
+            checkpoint['state_dict'] = unwrap_distributed(checkpoint['state_dict'])
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
 
@@ -434,12 +442,14 @@ def main():
 
     if args.checkpoint_path != "":
         load_checkpoint(model, optimizer, start_epoch, model_config,
-                        args.amp, args.checkpoint_path, local_rank)
+                        args.amp, args.checkpoint_path, local_rank,
+                        args.resume_from_multiproc)
 
     start_epoch = start_epoch[0]
     # import pdb; pdb.set_trace()
 
-    criterion = loss_functions.get_loss_function(model_name, sigma)
+    criterion = loss_functions.get_loss_function(model_name, sigma,
+                                                 modified_taco_loss=False)
 
     try:
         n_frames_per_step = args.n_frames_per_step

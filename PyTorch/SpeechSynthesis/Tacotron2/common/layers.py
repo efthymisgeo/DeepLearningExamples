@@ -66,9 +66,29 @@ class ConvNorm(torch.nn.Module):
 
 
 class TacotronSTFT(torch.nn.Module):
-    def __init__(self, filter_length=1024, hop_length=256, win_length=1024,
-                 n_mel_channels=80, sampling_rate=22050, mel_fmin=0.0,
+    def __init__(self,
+                 filter_length=1024,
+                 hop_length=256, win_length=1024,
+                 n_mel_channels=80,
+                #  sampling_rate=22050,
+                 sampling_rate=16000,
+                 mel_fmin=0.0,
                  mel_fmax=8000.0):
+        """
+        PyTorch layer which calculates mel spectrograms
+
+        Args:
+            filter_length (int): the number of fft components
+            hop_length (int): the window slide over the waveform,
+                with suggested value 12.5ms
+            win_length (int): the size of the window to be applied, suggested
+                value is 50ms
+            n_mel_channels (int): the number of mel bands/bins to be generated
+            sampling_rate (int): the sampling rate of the audio waveform, given
+                data of the same sr suggested value can be found via sox
+            mel_fmin (float): pls refer to librosa documentation
+            mel_fmax (flaot): pls refer to librosa documentation
+        """
         super(TacotronSTFT, self).__init__()
         self.n_mel_channels = n_mel_channels
         self.sampling_rate = sampling_rate
@@ -77,6 +97,12 @@ class TacotronSTFT(torch.nn.Module):
             sampling_rate, filter_length, n_mel_channels, mel_fmin, mel_fmax)
         mel_basis = torch.from_numpy(mel_basis).float()
         self.register_buffer('mel_basis', mel_basis)
+        # print(f"The mel channels are {self.n_mel_channels}")
+        # print(f"The sr is {self.sampling_rate}")
+        # print(f"The filter length is {filter_length}")
+        # print(f"The hop length is {hop_length}")
+        # print(f"The win length is {win_length}")
+        # print(f"The mel basis has size {self.mel_basis.size()}")
 
     def spectral_normalize(self, magnitudes):
         output = dynamic_range_compression(magnitudes)
@@ -85,6 +111,21 @@ class TacotronSTFT(torch.nn.Module):
     def spectral_de_normalize(self, magnitudes):
         output = dynamic_range_decompression(magnitudes)
         return output
+
+    def spectrogram(self, y):
+        """
+        Computes spectrogram from batch of waves
+
+        Args:
+            y (torch.FloatTensor) (B, T) in range [-1, 1]
+        Returns:
+            magnitudes (torch.FloatTensor) (B, n_spec_channels, T)
+        """
+        assert(torch.min(y.data) >= -1)
+        assert(torch.max(y.data) <= 1)
+
+        magnitudes, phases = self.stft_fn.transform(y)
+        return magnitudes
 
     def mel_spectrogram(self, y):
         """Computes mel-spectrograms from a batch of waves

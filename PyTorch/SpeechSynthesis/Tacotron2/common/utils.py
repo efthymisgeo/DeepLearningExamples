@@ -44,14 +44,23 @@ def load_wav_to_torch(full_path):
     return torch.FloatTensor(data.astype(np.float32)), sampling_rate
 
 
-def load_filepaths_and_text(dataset_path, filename, split="|"):
+def load_filepaths_and_text(dataset_path, filename, split="|",
+                            use_intermed=None):
+    """This function accepts a filename under which the full path to the
+    audio/mel file is given and separated with a split character `|`
+    >> LJSpeech-1.1/mels/LJ033-0149.pt|Three years after.
+    """
+    # import pdb; pdb.set_trace()
     with open(filename, encoding='utf-8') as f:
         def split_line(root, line):
             parts = line.strip().split(split)
             if len(parts) > 2:
                 raise Exception(
                     "incorrect line format for file: {}".format(filename))
-            path = os.path.join(root, parts[0])
+            if use_intermed is None:
+                path = os.path.join(root, parts[0])
+            else:
+                path = os.path.join(root, use_intermed, parts[0])
             text = parts[1]
             return path, text
         filepaths_and_text = [split_line(dataset_path, line) for line in f]
@@ -64,3 +73,23 @@ def to_gpu(x):
     if torch.cuda.is_available():
         x = x.cuda(non_blocking=True)
     return x
+
+
+def remove_prefix(filename):
+    new_txt = []
+    with open(filename, encoding='utf-8') as f:
+        def split_prefix(line):
+            split_line = line.split("|")
+            datapath = split_line[0].split("/")[1]
+            text = split_line[1]
+            return datapath, text
+        for line in f:
+            print(line)
+            splitted = split_prefix(line)
+            datapath = splitted[0]
+            text = splitted[1]
+            new_txt.append(f"{datapath}|{text}")
+
+    fd = open("demofile3.txt", "w")
+    for txt in new_txt:
+        fd.write(txt)

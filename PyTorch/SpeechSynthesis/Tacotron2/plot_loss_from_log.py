@@ -44,6 +44,9 @@ def clean_json(path, skip=39, max_epochs=1502):
             epoch_id = tmp_line["step"][0]
             data_name = list(tmp_line["data"].keys())[0]
             data_value = tmp_line["data"][data_name]
+            # branch to return shorter parts of the log
+            if int(epoch_id) > max_epochs:
+                return epochs, loss
             if epoch_id not in epochs:
                 epochs.append(epoch_id)
             if data_name in KEEP_NAMES:
@@ -52,17 +55,17 @@ def clean_json(path, skip=39, max_epochs=1502):
     return epochs, loss
 
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-lp", "--log_path", required=True,
                         help="path to log file")
-    parser.add_argument("--skip", required=False, default=39,
+    parser.add_argument("--skip", required=False, type=int, default=39,
                         help="Lines to skip in the beginning")
     parser.add_argument("--max_epochs", required=False, default=1502,
-                       help="max epochs of network training")
-    parser.add_argument("--title", type=str, required=False, default="Tacotron2",
-                       help="the title of the figure")
+                        type=int, help="max epochs of network training")
+    parser.add_argument("--title", type=str, required=False,
+                        default="Tacotron2",
+                        help="the title of the figure")
 
     args = parser.parse_args()
     path = args.log_path
@@ -84,5 +87,5 @@ if __name__ == "__main__":
     plt.grid(b=True, which='major', color='#666666', linestyle='--')
     plt.minorticks_on()
     plt.grid(b=True, which='minor', color='#999999', linestyle='--', alpha=0.2)
-    plt.savefig(f"{header}_en_custom_loss.png")
-    plt.savefig(f"{header}_en_custom_loss.pdf")
+    plt.savefig(f"{header}_gr_custom_loss.png")
+    plt.savefig(f"{header}_gr_custom_loss.pdf")

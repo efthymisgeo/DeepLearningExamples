@@ -49,9 +49,14 @@ class TextMelLoader(torch.utils.data.Dataset):
         self.sampling_rate = args.sampling_rate
         self.load_mel_from_disk = args.load_mel_from_disk
         self.stft = layers.TacotronSTFT(
-            args.filter_length, args.hop_length, args.win_length,
-            args.n_mel_channels, args.sampling_rate, args.mel_fmin,
-            args.mel_fmax)
+                        args.filter_length,
+                        args.hop_length,
+                        args.win_length,
+                        args.n_mel_channels,
+                        args.sampling_rate,
+                        args.mel_fmin,
+                        args.mel_fmax)
+        self.load_numpy = args.numpy_mels
         random.seed(1234)
         random.shuffle(self.audiopaths_and_text)
 
@@ -59,16 +64,20 @@ class TextMelLoader(torch.utils.data.Dataset):
         # separate filename and text
         audiopath, text = audiopath_and_text[0], audiopath_and_text[1]
         len_text = len(text)
+        # print(f"text before is {text}")
         text = self.get_text(text)
+        # print(f"text after is {text}")
         mel = self.get_mel(audiopath)
         return (text, mel, len_text)
 
     def get_mel(self, filename):
         if not self.load_mel_from_disk:
+            # import pdb; pdb.set_trace()
             audio, sampling_rate = load_wav_to_torch(filename)
+            # print(f"Sampling rate is {sampling_rate} and STFT sampling rate is {self.stft.sampling_rate}")
             if sampling_rate != self.stft.sampling_rate:
-                raise ValueError("{} {} SR doesn't match target {} SR".format(
-                    sampling_rate, self.stft.sampling_rate))
+                raise ValueError(f"{sampling_rate} SR doesn't match target"
+                                 f"{self.stft.sampling_rate} SR")
             audio_norm = audio / self.max_wav_value
             audio_norm = audio_norm.unsqueeze(0)
             audio_norm = \
@@ -76,14 +85,34 @@ class TextMelLoader(torch.utils.data.Dataset):
             melspec = self.stft.mel_spectrogram(audio_norm)
             melspec = torch.squeeze(melspec, 0)
         else:
-            melspec = torch.load(filename)
+            if self.load_numpy:
+                melspec = np.load(filename)
+                melspec = torch.from_numpy(melspec)
+            else:
+                melspec = torch.load(filename)
             assert melspec.size(0) == self.stft.n_mel_channels, (
                 'Mel dimension mismatch: given {}, expected {}'.format(
                     melspec.size(0), self.stft.n_mel_channels))
 
         return melspec
 
+    def get_spec(self, filename):
+        # import pdb; pdb.set_trace()
+        audio, sampling_rate = load_wav_to_torch(filename)
+        # print(f"Sampling rate is {sampling_rate} and STFT sampling rate is {self.stft.sampling_rate}")
+        if sampling_rate != self.stft.sampling_rate:
+            raise ValueError(f"{sampling_rate} SR doesn't match target"
+                                f"{self.stft.sampling_rate} SR")
+        audio_norm = audio / self.max_wav_value
+        audio_norm = audio_norm.unsqueeze(0)
+        audio_norm = \
+            torch.autograd.Variable(audio_norm, requires_grad=False)
+        spec = self.stft.spectrogram(audio_norm)
+        spec = torch.squeeze(spec, 0)
+        return spec
+
     def get_text(self, text):
+        "function which maps input text to integer tensor list"
         text_norm = torch.IntTensor(text_to_sequence(text, self.text_cleaners))
         return text_norm
 
